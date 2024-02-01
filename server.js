@@ -1,12 +1,12 @@
 const express = require("express");
 const mysql = require("mysql2/promise");
-const bodyParser = require("body-parser");
 
 const HOST = "localhost";
-const PORT = 100;
+const PORT = 4004;
 
 const app = express();
-app.use(bodyParser.json());
+
+app.use(express.json());
 
 const db = mysql.createPool({
     host: "localhost",
@@ -17,7 +17,7 @@ const db = mysql.createPool({
     enableKeepAlive: true
 });
 
-app.post("/api/routes/", async (req, res) => {
+app.post("/api/routes", async (req, res) => {
     const inputData = req.body;
     if(!inputData.boarding_point || !inputData.dropping_point){
         res.status(400).send("One of routes property is missing");
@@ -192,7 +192,7 @@ app.get("/api/users/:userId/bookings", async (req, res) => {
             return;
         }
         const [output] = await db.execute("SELECT * FROM bookings WHERE user_id = ?", [user.userId]);
-        res.status(200).send(output);
+        res.status(200).send(JSON.stringify(output));
     }
     catch(error){
         res.status(500).send("Internal Server Error");
@@ -213,6 +213,7 @@ app.get("/api/buses/:busId/seats", async (req, res) => {
                 res.status(200).send(JSON.stringify(seatResult));
                 return;
             }
+            //TODO: Write code to handle when all bus seats are occupied
         }
         res.status(404).send("No Buses Found");
     }
