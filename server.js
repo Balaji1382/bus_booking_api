@@ -132,7 +132,6 @@ app.get("/api/buses", async (req, res) => {
     }
 });
 
-//TODO: Validate the endpoint below
 app.post("/api/register", async (req, res) => {
     const credentials = req.body;
     if(!credentials.name || !credentials.email || !credentials.password){
@@ -157,7 +156,6 @@ app.post("/api/register", async (req, res) => {
     }
 });
 
-//TODO: Validate the endpoint below
 app.post("/api/login", async (req, res) => {
     const credentials = req.body;
     if(!credentials.email || !credentials.password){
@@ -181,7 +179,6 @@ app.post("/api/login", async (req, res) => {
     res.status(200).send("Logged In successfully");
 });
 
-//TODO: Validate the endpoint
 app.get("/api/users/:userId/bookings", async (req, res) => {
     const user = req.params;
     user.userId = Number(user.userId);
