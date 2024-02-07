@@ -1,18 +1,23 @@
+require("dotenv").config();
+
 const express = require("express");
 const mysql = require("mysql2/promise");
 
+const bcrypt = require("bcrypt");
+const saltRounds = 4;
+
 const HOST = "localhost";
-const PORT = 4004;
+const PORT = process.env.CONN_PORT;
 
 const app = express();
 
 app.use(express.json());
 
 const db = mysql.createPool({
-    host: "localhost",
-    user: "root",
-    password: "root",
-    database: "bus_booking_test",
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_DATABASE_NAME,
     connectionLimit: 10,
     enableKeepAlive: true
 });
@@ -142,8 +147,10 @@ app.post("/api/register", async (req, res) => {
     try{
         const [email] = await db.execute("SELECT id FROM users WHERE email = ?", [credentials.email]);
         if(email.length === 0){
+            const salt = await bcrypt.genSalt(saltRounds);
+            const hashedPassword = await bcrypt.hash(credentials.password, salt);
             await db.execute("INSERT INTO users(name, email, password) VALUES (?, ?, ?)", 
-                [credentials.name, credentials.email, credentials.password]);
+                [credentials.name, credentials.email, hashedPassword]);
             res.status(201).send("Registration Successfull");
         }
         else{
@@ -164,9 +171,15 @@ app.post("/api/login", async (req, res) => {
     }
     credentials.email = credentials.email.toLowerCase();
     try{
-        const [result] = await db.execute("SELECT * FROM users WHERE email = ? AND password = ?", 
-            [credentials.email, credentials.password]);
+        const [result] = await db.execute("SELECT * FROM users WHERE email = ?", 
+            [credentials.email]);
         if(result.length === 0){
+            res.status(404).send("Invalid Username or Password");
+            return;
+        }
+        res.locals.result = result[0];
+        const correctPassword = await bcrypt.compare(credentials.password, res.locals.result.password);
+        if(!correctPassword){
             res.status(404).send("Invalid Username or Password");
             return;
         }
@@ -176,10 +189,11 @@ app.post("/api/login", async (req, res) => {
         console.log(error);
         return;
     }
-    res.status(200).send("Logged In successfully");
+    //res.set("Set-Cookie", `userId=${res.locals.result.id}; HttpOnly`);
+    res.status(200).send(JSON.stringify({"message":"Logged In Successfully", "userId": res.locals.result.id}));
 });
 
-app.get("/api/users/:userId/bookings", async (req, res) => {
+app.get("/api/users/:userId/bookings", userAuth, async (req, res) => {
     const user = req.params;
     user.userId = Number(user.userId);
     try{
@@ -219,6 +233,11 @@ app.get("/api/buses/:busId/seats", async (req, res) => {
         console.log(error);
     }
 });
+
+function userAuth(req, res, next){
+    res.locals.userId = 2;
+    next();
+}
 
 app.listen(PORT, () => {
     console.log(`The api is running on http://${HOST}:${PORT}`);
