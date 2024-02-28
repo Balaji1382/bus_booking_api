@@ -19,6 +19,7 @@ const db = mysql.createPool({
     password: process.env.DB_PASSWORD,
     database: process.env.DB_DATABASE_NAME,
     connectionLimit: 10,
+    timezone: "+05:30",
     enableKeepAlive: true
 });
 
@@ -230,6 +231,93 @@ app.get("/api/buses/:busId/seats", async (req, res) => {
     }
     catch(error){
         res.status(500).send("Internal Server Error");
+        console.log(error);
+    }
+});
+
+app.post("/api/users/:userId/bookings", async(req, res) => {
+    const booking_details = req.body;
+    if(!booking_details.bus_id || !booking_details.seat_number || !booking_details.passenger_name ||
+        !booking_details.passenger_age || !booking_details.passenger_gender){
+        res.status(400).send("Request Body might miss some Credentials");
+        return;
+    }
+    try{
+        const [ifUserExists] = await db.execute("SELECT id FROM users WHERE id = ?", [req.params.userId]);
+        if(ifUserExists.length === 0){
+            res.status(404).send("User not Found");
+            return;
+        }
+        const [ifBusExists] = await db.execute("SELECT id FROM buses WHERE id = ?", [booking_details.bus_id]);
+        if(ifBusExists.length === 0){
+            res.status(404).send("Bus not Found");
+            return;
+        }
+        const [seatStatus] = await db.execute("SELECT status FROM seats WHERE bus_id = ? AND seat_number = ?",
+            [booking_details.bus_id, booking_details.seat_number]);
+        if(seatStatus.length === 0){
+            res.status(404).send("Seat not Found");
+            return;
+        }
+        if(seatStatus[0].status === "vacant"){
+            await db.execute("UPDATE seats SET status = 'booked' WHERE bus_id = ? AND seat_number = ?", 
+                [booking_details.bus_id, booking_details.seat_number]);
+            await db.execute("INSERT INTO bookings(user_id, bus_id, date, seat, passenger_name, passenger_age, passenger_gender) VALUES(?, ?, NOW(), ?, ?, ?, ?)", 
+                [req.params.userId, booking_details.bus_id, booking_details.seat_number, booking_details.passenger_name, booking_details.passenger_age, booking_details.passenger_gender]);
+            res.status(200).send("Seat Booked");
+        }
+        else{
+            res.status(409).send("Seat Already booked");
+        }
+    }
+    catch(error){
+        res.status(500).send("Internal Server Error");
+        console.log(error);
+    }
+});
+
+app.delete("/api/users/:userId/bookings", async(req, res) => {
+    const cancellation_details = req.body;
+    if(!cancellation_details.bus_id || !cancellation_details.seat_number){
+        res.status(400).send("Some details might be missing");
+        return;
+    }
+    try{
+        const [ifUserExists] = await db.execute("SELECT id from users WHERE id = ?", [req.params.userId]);
+        if(ifUserExists.length === 0){
+            res.status(404).send("User not Found");
+            return;
+        }
+        const [ifBusExists] = await db.execute("SELECT id from buses WHERE id = ?", [cancellation_details.bus_id]);
+        if(ifBusExists.length === 0){
+            res.status(404).send("Bus not Found");
+            return;
+        }
+        const [seatStatus] = await db.execute("SELECT status from seats WHERE bus_id = ? AND seat_number = ?", 
+            [cancellation_details.bus_id, cancellation_details.seat_number]);
+        if(seatStatus.length === 0){
+            res.status(404).send("Seat not Found");
+            return;
+        }
+        if(seatStatus[0].status === "vacant"){
+            res.status(200).send("Seat's vacant. Booking might be cancelled already");
+            return;
+        }
+        else if(seatStatus[0].status === "booked"){
+            await db.execute("UPDATE seats SET status = 'vacant' WHERE bus_id = ? AND seat_number = ?", [cancellation_details.bus_id, cancellation_details.seat_number]);
+            await db.execute("UPDATE bookings SET status = 'cancelled', date = NOW() WHERE bus_id = ? AND seat = ? AND user_id = ?", [cancellation_details.bus_id, cancellation_details.seat_number, req.params.userId]);
+            res.status(200).send("Booking cancelled");
+            return;
+        }
+        else{
+            // never comes here
+            // db status column can only be filled with ("vacant", "booked")
+            res.status(500).send("Internal Servor Error");
+            return;
+        }
+    }
+    catch(error){
+        res.status(500).send("Internal Servor Error");
         console.log(error);
     }
 });
