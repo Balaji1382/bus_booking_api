@@ -1,10 +1,12 @@
 require("dotenv").config();
 
 const express = require("express");
-const mysql = require("mysql2/promise");
 
-const bcrypt = require("bcrypt");
-const saltRounds = 4;
+const { getUserBookings, updateUserBookings, createUserBookings } = require("./src/bookings");
+const { getAllRoutes, createRoutes } = require("./src/routes");
+const { createBuses, getAllBuses } = require("./src/buses");
+const { createUser, loginUser } = require("./src/users");
+const { getBusSeats } = require("./src/seats");
 
 const HOST = "localhost";
 const PORT = process.env.CONN_PORT;
@@ -13,319 +15,37 @@ const app = express();
 
 app.use(express.json());
 
-const db = mysql.createPool({
-    host: process.env.DB_HOST,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_DATABASE_NAME,
-    connectionLimit: 10,
-    timezone: "+05:30",
-    enableKeepAlive: true
-});
+// methods for manipulating buses resource
 
-app.post("/api/routes", async (req, res) => {
-    const inputData = req.body;
-    if(!inputData.boarding_point || !inputData.dropping_point){
-        res.status(400).send("One of routes property is missing");
-        return;
-    }
-    Object.keys(inputData).forEach(key => {
-        if(typeof inputData[key] === "string"){
-            inputData[key] = inputData[key].toLowerCase();
-        }
-    });
-    if(inputData.boarding_point === inputData.dropping_point){
-        res.status(400).send("Properties cannot be the same");
-        return;
-    }
-    try{
-        const [result] = await db.execute("SELECT id FROM routes WHERE boarding_point = ? AND dropping_point = ?", 
-            Object.values(inputData));
-        if(result.length === 0){
-            await db.execute("INSERT INTO routes(boarding_point, dropping_point) VALUES (?, ?)", 
-                Object.values(inputData)); 
-        }
-        res.status(201).send("Route Created");
-    }
-    catch(error){
-        res.status(500).send("Internal Server Error");
-        console.log(error);
-    }
-});
+app.post("/api/buses", createBuses);
 
-app.post("/api/buses", async (req, res) => {
-    const inputData = req.body;
-    if(!inputData.name || !inputData.from || !inputData.to || !inputData.timing 
-        || !inputData.remaining_seats || !inputData.time_taken){
-        res.status(400).send("One of bus property is missing");
-        return;
-    }
-    Object.keys(inputData).forEach(key => {
-        if(key === 'name'){
-            return;
-        }
-        if(typeof inputData[key] === "string"){
-            inputData[key] = inputData[key].toLowerCase();
-        }
-    });
-    if(inputData.from === inputData.to){
-        res.status(400).send("Boarding and Dropping points can't be same");
-        return;
-    }
-    try{
-        let [route] = await db.execute("SELECT id FROM routes WHERE boarding_point = ? AND dropping_point = ?", 
-            [inputData.from, inputData.to]);
-        if(route.length === 0){
-            await db.execute("INSERT INTO routes(boarding_point, dropping_point) VALUES (?, ?)",
-                [inputData.from, inputData.to]);
-            [route] = await db.execute("SELECT id FROM routes WHERE boarding_point = ? AND dropping_point = ?",
-                [inputData.from, inputData.to]);            
-        }
-        else{
-            const [found] = await db.execute("SELECT id FROM buses WHERE name = CAST(? AS BINARY) AND route_id = ?",
-                [inputData.name, route[0].id]);
-            if(found.length > 0){
-                res.status(409).send("Bus already exists");
-                return;
-            }
-        }
-        await db.execute("INSERT INTO buses(name, route_id, timing, remaining_seats, time_taken_in_mins) VALUES(?, ?, ?, ?, ?)", 
-            [inputData.name, route[0].id, inputData.timing, inputData.remaining_seats, inputData.time_taken]);
-        let [bus] = await db.execute("SELECT id FROM buses WHERE name = CAST(? AS BINARY) AND route_id = ?", 
-            [inputData.name, route[0].id]);
-        for(let index = 1; index <= Number(inputData.remaining_seats); index++){
-            db.execute("INSERT INTO seats(bus_id, seat_number) VALUES (?, ?)",
-                [bus[0].id, index]);
-        }
-        res.status(201).send("Bus created");
-    }
-    catch(error){
-        res.status(500).send("Internal Server Error");
-        console.log(error);
-        return;
-    }
-});
+app.get("/api/buses", getAllBuses);
 
-app.get("/api/routes", async (req, res) => {
-    try{
-        const [result] = await db.execute("SELECT * FROM routes");
-        if(result.length >= 1){
-            res.status(200).send(JSON.stringify(result));
-        }
-        else{
-            res.status(404).send("No Routes found");
-        }
-    }
-    catch(error){
-        res.status(500).send("Internal Server Error");
-        console.log(error);
-    }
-});
+// methods for manipulating routes resource
 
-app.get("/api/buses", async (req, res) => {
-    try{
-        const [result] = await db.execute("SELECT * FROM buses");
-        if(result.length >= 1){
-            res.status(200).send(JSON.stringify(result));
-        }
-        else{
-            res.status(404).send("No buses found");
-        }
-    }
-    catch(error){
-        res.status(500).send("Internal Server Error");
-        console.log(error.message);
-    }
-});
+app.post("/api/routes", createRoutes);
 
-app.post("/api/register", async (req, res) => {
-    const credentials = req.body;
-    if(!credentials.name || !credentials.email || !credentials.password){
-        res.status(400).send("One of the User properties is missing");
-        return;
-    }
-    credentials.email = credentials.email.toLowerCase();
-    try{
-        const [email] = await db.execute("SELECT id FROM users WHERE email = ?", [credentials.email]);
-        if(email.length === 0){
-            const salt = await bcrypt.genSalt(saltRounds);
-            const hashedPassword = await bcrypt.hash(credentials.password, salt);
-            await db.execute("INSERT INTO users(name, email, password) VALUES (?, ?, ?)", 
-                [credentials.name, credentials.email, hashedPassword]);
-            res.status(201).send("Registration Successfull");
-        }
-        else{
-            res.status(409).send("Email already in use");
-        }
-    }
-    catch(error){
-        res.status(500).send("Internal Server Error");
-        console.log(error);
-    }
-});
+app.get("/api/routes", getAllRoutes);
 
-app.post("/api/login", async (req, res) => {
-    const credentials = req.body;
-    if(!credentials.email || !credentials.password){
-        res.status(400).send("One of Login Properties is missing");
-        return;
-    }
-    credentials.email = credentials.email.toLowerCase();
-    try{
-        const [result] = await db.execute("SELECT * FROM users WHERE email = ?", 
-            [credentials.email]);
-        if(result.length === 0){
-            res.status(404).send("Invalid Username or Password");
-            return;
-        }
-        res.locals.result = result[0];
-        const correctPassword = await bcrypt.compare(credentials.password, res.locals.result.password);
-        if(!correctPassword){
-            res.status(404).send("Invalid Username or Password");
-            return;
-        }
-    }
-    catch(error){
-        res.status(500).send("Internal Server Error");
-        console.log(error);
-        return;
-    }
-    //res.set("Set-Cookie", `userId=${res.locals.result.id}; HttpOnly`);
-    res.status(200).send(JSON.stringify({"message":"Logged In Successfully", "userId": res.locals.result.id}));
-});
+// method to handle new user registration
 
-app.get("/api/users/:userId/bookings", userAuth, async (req, res) => {
-    const user = req.params;
-    user.userId = Number(user.userId);
-    try{
-        const [userResult] = await db.execute("SELECT id FROM users WHERE id = ?", [user.userId]);
-        if(userResult.length == 0){
-            res.status(404).send("User not Found");
-            return;
-        }
-        const [output] = await db.execute("SELECT * FROM bookings WHERE user_id = ?", [user.userId]);
-        res.status(200).send(JSON.stringify(output));
-    }
-    catch(error){
-        res.status(500).send("Internal Server Error");
-        console.log(error);
-        return;
-    }
-});
+app.post("/api/register", createUser);
 
-//TODO: Validate the endpoint
-app.get("/api/buses/:busId/seats", async (req, res) => {
-    const bus = req.params;
-    bus.busId = Number(bus.busId);
-    try{
-        const [busResult] = await db.execute("SELECT * FROM buses WHERE id = ?", [bus.busId]);
-        if(busResult.length > 0){
-            const [seatResult] = await db.execute("SELECT * FROM seats WHERE bus_id = ?", [bus.busId]);
-            if(seatResult.length > 0){
-                res.status(200).send(JSON.stringify(seatResult));
-                return;
-            }
-            //TODO: Write code to handle when all bus seats are occupied
-        }
-        res.status(404).send("No Buses Found");
-    }
-    catch(error){
-        res.status(500).send("Internal Server Error");
-        console.log(error);
-    }
-});
+// method to handle login
 
-app.post("/api/users/:userId/bookings", async(req, res) => {
-    const booking_details = req.body;
-    if(!booking_details.bus_id || !booking_details.seat_number || !booking_details.passenger_name ||
-        !booking_details.passenger_age || !booking_details.passenger_gender){
-        res.status(400).send("Request Body might miss some Credentials");
-        return;
-    }
-    try{
-        const [ifUserExists] = await db.execute("SELECT id FROM users WHERE id = ?", [req.params.userId]);
-        if(ifUserExists.length === 0){
-            res.status(404).send("User not Found");
-            return;
-        }
-        const [ifBusExists] = await db.execute("SELECT id FROM buses WHERE id = ?", [booking_details.bus_id]);
-        if(ifBusExists.length === 0){
-            res.status(404).send("Bus not Found");
-            return;
-        }
-        const [seatStatus] = await db.execute("SELECT status FROM seats WHERE bus_id = ? AND seat_number = ?",
-            [booking_details.bus_id, booking_details.seat_number]);
-        if(seatStatus.length === 0){
-            res.status(404).send("Seat not Found");
-            return;
-        }
-        if(seatStatus[0].status === "vacant"){
-            await db.execute("UPDATE seats SET status = 'booked' WHERE bus_id = ? AND seat_number = ?", 
-                [booking_details.bus_id, booking_details.seat_number]);
-            await db.execute("INSERT INTO bookings(user_id, bus_id, date, seat, passenger_name, passenger_age, passenger_gender) VALUES(?, ?, NOW(), ?, ?, ?, ?)", 
-                [req.params.userId, booking_details.bus_id, booking_details.seat_number, booking_details.passenger_name, booking_details.passenger_age, booking_details.passenger_gender]);
-            res.status(200).send("Seat Booked");
-        }
-        else{
-            res.status(409).send("Seat Already booked");
-        }
-    }
-    catch(error){
-        res.status(500).send("Internal Server Error");
-        console.log(error);
-    }
-});
+app.post("/api/login", loginUser);
 
-app.delete("/api/users/:userId/bookings", async(req, res) => {
-    const cancellation_details = req.body;
-    if(!cancellation_details.bus_id || !cancellation_details.seat_number){
-        res.status(400).send("Some details might be missing");
-        return;
-    }
-    try{
-        const [ifUserExists] = await db.execute("SELECT id from users WHERE id = ?", [req.params.userId]);
-        if(ifUserExists.length === 0){
-            res.status(404).send("User not Found");
-            return;
-        }
-        const [ifBusExists] = await db.execute("SELECT id from buses WHERE id = ?", [cancellation_details.bus_id]);
-        if(ifBusExists.length === 0){
-            res.status(404).send("Bus not Found");
-            return;
-        }
-        const [seatStatus] = await db.execute("SELECT status from seats WHERE bus_id = ? AND seat_number = ?", 
-            [cancellation_details.bus_id, cancellation_details.seat_number]);
-        if(seatStatus.length === 0){
-            res.status(404).send("Seat not Found");
-            return;
-        }
-        if(seatStatus[0].status === "vacant"){
-            res.status(200).send("Seat's vacant. Booking might be cancelled already");
-            return;
-        }
-        else if(seatStatus[0].status === "booked"){
-            await db.execute("UPDATE seats SET status = 'vacant' WHERE bus_id = ? AND seat_number = ?", [cancellation_details.bus_id, cancellation_details.seat_number]);
-            await db.execute("UPDATE bookings SET status = 'cancelled', date = NOW() WHERE bus_id = ? AND seat = ? AND user_id = ?", [cancellation_details.bus_id, cancellation_details.seat_number, req.params.userId]);
-            res.status(200).send("Booking cancelled");
-            return;
-        }
-        else{
-            // never comes here
-            // db status column can only be filled with ("vacant", "booked")
-            res.status(500).send("Internal Servor Error");
-            return;
-        }
-    }
-    catch(error){
-        res.status(500).send("Internal Servor Error");
-        console.log(error);
-    }
-});
+// methods to manipulate Bus Seats
 
-function userAuth(req, res, next){
-    res.locals.userId = 2;
-    next();
-}
+app.get("/api/buses/:busId/seats", getBusSeats);
+
+// methods for manipulating bookings resource
+
+app.get("/api/users/:userId/bookings", getUserBookings);
+
+app.post("/api/users/:userId/bookings", createUserBookings);
+
+app.patch("/api/users/:userId/bookings", updateUserBookings);
 
 app.listen(PORT, () => {
     console.log(`The api is running on http://${HOST}:${PORT}`);
